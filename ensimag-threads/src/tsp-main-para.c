@@ -153,9 +153,12 @@ int main (int argc, char **argv)
     if (q.nbmax < nb_threads_used){
         nb_threads_used = q.nbmax;
     }
+    // Calcul du nombre d emise en parallèle nécessaire
+    int nb_para = q.nbmax/nb_threads_used + (((q.nbmax%nb_threads_used)==0)?0:1);
     // Création des différents threads
     pthread_t traitement_tache_pid[nb_threads_used];
     int hops = 0, len = 0;
+    // Création des arguments pour le traitement d'une tâche
     struct argument_get_job *arguments;
     arguments->q = &q;
     arguments->hops = &hops;
@@ -163,15 +166,18 @@ int main (int argc, char **argv)
     arguments->vpres = &vpres;
     arguments->p = &solution;
     arguments->cuts = 0;
-    for(int i=0; i<nb_threads_used; i++){
-        pthread_create(&(traitement_tache_pid[i]), NULL, traitement_tache, (void *) arguments);
-    }
-    // Parallélisation //
-    void* status;
-    for(int i=0; i<nb_threads_used; i++){
-        pthread_join(traitement_tache_pid[i], &status);
-        if(status == ALL_IS_OK){
-            printf("Thread %lx completed OK.\n", traitement_tache_pid[i]);
+    // Chaque mise en parallèle
+    for(int k=0; k<nb_para;k++) {
+        for (int i = 0; i < nb_threads_used; i++) {
+            pthread_create(&(traitement_tache_pid[i]), NULL, traitement_tache, (void *) arguments);
+        }
+        // Parallélisation //
+        void *status;
+        for (int i = 0; i < nb_threads_used; i++) {
+            pthread_join(traitement_tache_pid[i], &status);
+            if (status == ALL_IS_OK) {
+                printf("Thread %lx completed OK.\n", traitement_tache_pid[i]);
+            }
         }
     }
     /*while (!empty_queue (&q)) {
@@ -206,19 +212,19 @@ int main (int argc, char **argv)
 // Implémentation //
 void *traitement_tache(void *arg){
     struct argument_get_job* argu = (struct argument_get_job *)arg;
-    pthread_mutex_t mutex;
-    pthread_mutex_lock(&mutex);
     get_job(argu->q,*(argu->p),argu->hops,argu->len,argu->vpres);
+    // Mutex sur le min
     // le noeud est moins bon que la solution courante
+    pthread_mutex_t mutex_min;
+    pthread_mutex_lock(&mutex_min);
     if (minimum < INT_MAX
         && (nb_towns - *(argu->hops)) > 10
         && ( (lower_bound_using_hk(*(argu->p), *(argu->hops), *(argu->len), *(argu->vpres))) >= minimum
              || (lower_bound_using_lp(*(argu->p), *(argu->hops), *(argu->len), *(argu->vpres))) >= minimum)
             )
         return ALL_IS_OK;
+    pthread_mutex_unlock(&mutex_min);
 
     tsp (*(argu->hops), *(argu->len), *(argu->vpres), *(argu->p), &(argu->cuts), argu->sol, &(argu->sol_len));
-    pthread_mutex_unlock(&mutex);
-
     return ALL_IS_OK;
 }
