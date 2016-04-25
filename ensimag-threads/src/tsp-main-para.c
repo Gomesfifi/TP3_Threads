@@ -21,17 +21,19 @@
 // Structure des arguments pour le thread //
 struct argument_get_job{
     struct tsp_queue *q;
-    tsp_path_t p;
+    tsp_path_t *p;
     int *hops;
     int *len;
     uint64_t *vpres;
+    tsp_path_t sol;
+    int sol_len;
+    long long int cuts;
 };
 
 #define ALL_IS_OK (void *)(123456789L)
 
 // Prototypes //
-void copie(tsp_path_t dest, tsp_path_t src, int nbre);
-void * get_job_pid(void * arg);
+void *traitement_tache(void *arg);
 
 /* macro de mesure de temps, retourne une valeur en nanosecondes */
 #define TIME_DIFF(t1, t2) \
@@ -152,26 +154,27 @@ int main (int argc, char **argv)
         nb_threads_used = q.nbmax;
     }
     // Création des différents threads
-    pthread_t get_job_pid[nb_threads_used];
+    pthread_t traitement_tache_pid[nb_threads_used];
     int hops = 0, len = 0;
+    struct argument_get_job *arguments;
+    arguments->q = &q;
+    arguments->hops = &hops;
+    arguments->len = &len;
+    arguments->vpres = &vpres;
+    arguments->p = &solution;
+    arguments->cuts = 0;
     for(int i=0; i<nb_threads_used; i++){
-        struct argument_get_job *arguments;
-        arguments->q = &q;
-        arguments->hops = &hops;
-        arguments->len = &len;
-        arguments->vpres = &vpres;
-        copie(arguments->p,solution,MAX_TOWNS);
-        pthread_create(&(get_job_pid[i]),NULL,get_job_void,(void *)arguments);
+        pthread_create(&(traitement_tache_pid[i]), NULL, traitement_tache, (void *) arguments);
     }
     // Parallélisation //
     void* status;
     for(int i=0; i<nb_threads_used; i++){
-        pthread_join(get_job_pid[i],&status);
+        pthread_join(traitement_tache_pid[i], &status);
         if(status == ALL_IS_OK){
-            printf("Thread %lx completed OK.\n",get_job_pid[i]);
+            printf("Thread %lx completed OK.\n", traitement_tache_pid[i]);
         }
     }
-    while (!empty_queue (&q)) {
+    /*while (!empty_queue (&q)) {
         int hops = 0, len = 0;
         get_job (&q, solution, &hops, &len, &vpres);
 	
@@ -185,7 +188,7 @@ int main (int argc, char **argv)
 	  continue;
 
 	tsp (hops, len, vpres, solution, &cuts, sol, &sol_len);
-    }
+    }*/
     
     clock_gettime (CLOCK_REALTIME, &t2);
 
@@ -201,8 +204,21 @@ int main (int argc, char **argv)
 }
 
 // Implémentation //
-void copie(tsp_path_t dest, tsp_path_t src, int nbre){
-    for(int i = 0; i<nbre; i++){
-        dest[i] = src[i];
-    }
+void *traitement_tache(void *arg){
+    struct argument_get_job* argu = (struct argument_get_job *)arg;
+    pthread_mutex_t mutex;
+    pthread_mutex_lock(&mutex);
+    get_job(argu->q,*(argu->p),argu->hops,argu->len,argu->vpres);
+    // le noeud est moins bon que la solution courante
+    if (minimum < INT_MAX
+        && (nb_towns - *(argu->hops)) > 10
+        && ( (lower_bound_using_hk(*(argu->p), *(argu->hops), *(argu->len), *(argu->vpres))) >= minimum
+             || (lower_bound_using_lp(*(argu->p), *(argu->hops), *(argu->len), *(argu->vpres))) >= minimum)
+            )
+        return ALL_IS_OK;
+
+    tsp (*(argu->hops), *(argu->len), *(argu->vpres), *(argu->p), &(argu->cuts), argu->sol, &(argu->sol_len));
+    pthread_mutex_unlock(&mutex);
+
+    return ALL_IS_OK;
 }
