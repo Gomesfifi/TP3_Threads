@@ -8,6 +8,7 @@
 #include <complex.h>
 #include <stdbool.h>
 #include <unistd.h>
+#include <pthread.h>
 
 #include "tsp-types.h"
 #include "tsp-job.h"
@@ -17,6 +18,20 @@
 #include "tsp-lp.h"
 #include "tsp-hkbound.h"
 
+// Structure des arguments pour le thread //
+struct argument_get_job{
+    struct tsp_queue *q;
+    tsp_path_t p;
+    int *hops;
+    int *len;
+    uint64_t *vpres;
+};
+
+#define ALL_IS_OK (void *)(123456789L)
+
+// Prototypes //
+void copie(tsp_path_t dest, tsp_path_t src, int nbre);
+void * get_job_pid(void * arg);
 
 /* macro de mesure de temps, retourne une valeur en nanosecondes */
 #define TIME_DIFF(t1, t2) \
@@ -26,7 +41,7 @@
 /* tableau des distances */
 tsp_distance_matrix_t tsp_distance ={};
 
-/** Param�tres **/
+/** Param�tres **/
 
 /* nombre de villes */
 int nb_towns=10;
@@ -48,7 +63,7 @@ static void generate_tsp_jobs (struct tsp_queue *q, int hops, int len, uint64_t 
     }
     
     if (hops == depth) {
-        /* On enregistre du travail � faire plus tard... */
+        /* On enregistre du travail � faire plus tard... */
       add_job (q, path, hops, len, vpres);
     } else {
         int me = path [hops - 1];        
@@ -131,6 +146,31 @@ int main (int argc, char **argv)
     tsp_path_t solution;
     memset (solution, -1, MAX_TOWNS * sizeof (int));
     solution[0] = 0;
+    // Calcul du nombre de taches à paralléliser = min(nb_threads,nb_tache)
+    int nb_threads_used = nb_threads;
+    if (q.nbmax < nb_threads_used){
+        nb_threads_used = q.nbmax;
+    }
+    // Création des différents threads
+    pthread_t get_job_pid[nb_threads_used];
+    int hops = 0, len = 0;
+    for(int i=0; i<nb_threads_used; i++){
+        struct argument_get_job *arguments;
+        arguments->q = &q;
+        arguments->hops = &hops;
+        arguments->len = &len;
+        arguments->vpres = &vpres;
+        copie(arguments->p,solution,MAX_TOWNS);
+        pthread_create(&(get_job_pid[i]),NULL,get_job_void,(void *)arguments);
+    }
+    // Parallélisation //
+    void* status;
+    for(int i=0; i<nb_threads_used; i++){
+        pthread_join(get_job_pid[i],&status);
+        if(status == ALL_IS_OK){
+            printf("Thread %lx completed OK.\n",get_job_pid[i]);
+        }
+    }
     while (!empty_queue (&q)) {
         int hops = 0, len = 0;
         get_job (&q, solution, &hops, &len, &vpres);
@@ -158,4 +198,11 @@ int main (int argc, char **argv)
 	   perf/1000000ll, perf%1000000ll, cuts);
 
     return 0 ;
+}
+
+// Implémentation //
+void copie(tsp_path_t dest, tsp_path_t src, int nbre){
+    for(int i = 0; i<nbre; i++){
+        dest[i] = src[i];
+    }
 }
