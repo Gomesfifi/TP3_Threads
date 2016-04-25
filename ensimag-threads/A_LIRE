@@ -1,0 +1,8 @@
+Le projet compile mais il ne fonctionne pas. 
+Nous avons l'impression qu'il y a une sorte d'attente infinie de fin de thread ou de condition.
+
+Nous avons modifié les fichiers tsp-main-para.c et rajouté une fonction dans le module tsp-job 
+
+Je vous pris de jeter un oeil sur le code implémanté car nous avons travaillé sur le sujet même si nous n'avons pas pu finir à temps...
+
+Merci
