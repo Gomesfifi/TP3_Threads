@@ -30,10 +30,15 @@ struct argument_get_job{
     long long int cuts;
 };
 
-#define ALL_IS_OK (void *)(123456789L)
+#define ALL_IS_OK (void *)(1234567L)
 
 // Prototypes //
-void *traitement_tache(void *arg);
+void *get_job_void(void *arg);
+void *tsp_void(void *arg);
+
+// Mutex global et condition //
+pthread_mutex_t mutexVarJobs = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t condition = PTHREAD_COND_INITIALIZER;
 
 /* macro de mesure de temps, retourne une valeur en nanosecondes */
 #define TIME_DIFF(t1, t2) \
@@ -143,7 +148,7 @@ int main (int argc, char **argv)
     /* mettre les travaux dans la file d'attente */
     generate_tsp_jobs (&q, 1, 0, vpres, path, &cuts, sol, & sol_len, 3);
     no_more_jobs (&q);
-   
+
     /* calculer chacun des travaux */
     tsp_path_t solution;
     memset (solution, -1, MAX_TOWNS * sizeof (int));
@@ -153,34 +158,48 @@ int main (int argc, char **argv)
     if (q.nbmax < nb_threads_used){
         nb_threads_used = q.nbmax;
     }
-    // Calcul du nombre d emise en parallèle nécessaire
-    int nb_para = q.nbmax/nb_threads_used + (((q.nbmax%nb_threads_used)==0)?0:1);
+    // Calcul du nombre de mise en parallèle nécessaire
+    int nb_para = q.nbmax/nb_threads_used; // Garantit que l'on dépassera pas la file de tache
     // Création des différents threads
-    pthread_t traitement_tache_pid[nb_threads_used];
-    int hops = 0, len = 0;
+    pthread_t get_job_pid[nb_threads_used];
+    pthread_t tsp_pid[nb_threads_used];
+
+
     // Création des arguments pour le traitement d'une tâche
-    struct argument_get_job *arguments;
+    int hops,len;
+    struct argument_get_job *arguments = malloc(sizeof(struct argument_get_job));
     arguments->q = &q;
     arguments->hops = &hops;
     arguments->len = &len;
     arguments->vpres = &vpres;
     arguments->p = &solution;
     arguments->cuts = 0;
-    // Chaque mise en parallèle
+    // Chaque mise en paralèlle
     for(int k=0; k<nb_para;k++) {
         for (int i = 0; i < nb_threads_used; i++) {
-            pthread_create(&(traitement_tache_pid[i]), NULL, traitement_tache, (void *) arguments);
+            // Création des threads
+            hops=0;
+            len=0;
+            pthread_create(&(get_job_pid[i]), NULL, get_job_void, (void *) arguments);
+            pthread_create(&(tsp_pid[i]),NULL,tsp_void,(void*)arguments);
+
         }
-        // Parallélisation //
-        void *status;
+        // Attente fin des threads //
+        void * status;
+        void * status2;
         for (int i = 0; i < nb_threads_used; i++) {
-            pthread_join(traitement_tache_pid[i], &status);
+            pthread_join(get_job_pid[i], &status);
+            pthread_join(tsp_pid[i],&status2);
             if (status == ALL_IS_OK) {
-                printf("Thread %lx completed OK.\n", traitement_tache_pid[i]);
+                printf("Thread %lx completed OK.\n", get_job_pid[i]);
+            }
+            if (status2 == ALL_IS_OK){
+                printf("Thread %lx completed OK.\n", tsp_pid[i]);
             }
         }
     }
-    /*while (!empty_queue (&q)) {
+    // S'il reste des taches à traiter ( Pas besoin de mise en paralèlle ?)
+    while (!empty_queue (&q)) {
         int hops = 0, len = 0;
         get_job (&q, solution, &hops, &len, &vpres);
 	
@@ -194,7 +213,9 @@ int main (int argc, char **argv)
 	  continue;
 
 	tsp (hops, len, vpres, solution, &cuts, sol, &sol_len);
-    }*/
+    }
+
+    // Toutes les taches ont été traitées
     
     clock_gettime (CLOCK_REALTIME, &t2);
 
@@ -210,21 +231,31 @@ int main (int argc, char **argv)
 }
 
 // Implémentation //
-void *traitement_tache(void *arg){
+void *get_job_void(void *arg){
     struct argument_get_job* argu = (struct argument_get_job *)arg;
+    // On fait les modifications des variables
     get_job(argu->q,*(argu->p),argu->hops,argu->len,argu->vpres);
-    // Mutex sur le min
+    // On verouille le mutex
+    pthread_mutex_lock(&mutexVarJobs);
+    // On envoie le signal : Les variables ont été modifiées et
+    // le minimum a changé
     // le noeud est moins bon que la solution courante
-    pthread_mutex_t mutex_min;
-    pthread_mutex_lock(&mutex_min);
     if (minimum < INT_MAX
         && (nb_towns - *(argu->hops)) > 10
         && ( (lower_bound_using_hk(*(argu->p), *(argu->hops), *(argu->len), *(argu->vpres))) >= minimum
              || (lower_bound_using_lp(*(argu->p), *(argu->hops), *(argu->len), *(argu->vpres))) >= minimum)
             )
-        return ALL_IS_OK;
-    pthread_mutex_unlock(&mutex_min);
+        pthread_cond_signal(&condition);
+    // On deverouille le mutex
+    pthread_mutex_unlock(&mutexVarJobs);
 
-    tsp (*(argu->hops), *(argu->len), *(argu->vpres), *(argu->p), &(argu->cuts), argu->sol, &(argu->sol_len));
+    return ALL_IS_OK;
+}
+
+
+void *tsp_void(void *arg){
+    struct argument_get_job* argu = (struct argument_get_job *)arg;
+    tspPara(*(argu->hops), *(argu->len), *(argu->vpres), *(argu->p), &(argu->cuts), argu->sol, &(argu->sol_len),&mutexVarJobs,&condition);
+
     return ALL_IS_OK;
 }

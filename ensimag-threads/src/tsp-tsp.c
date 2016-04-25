@@ -10,6 +10,7 @@
 #include "tsp-lp.h"
 #include "tsp-hkbound.h"
 
+
 /* dernier minimum trouv� */
 int minimum;
 
@@ -24,11 +25,9 @@ int present (int city, int hops, tsp_path_t path, uint64_t vpres)
 
 void tsp (int hops, int len, uint64_t vpres, tsp_path_t path, long long int *cuts, tsp_path_t sol, int *sol_len)
 {
-    pthread_mutex_t mutex;
-    pthread_mutex_lock(&mutex);
+
     if (len + cutprefix[(nb_towns-hops)] >= minimum) {
         (*cuts)++ ;
-        pthread_mutex_unlock(&mutex);
         return;
     }
 
@@ -36,7 +35,6 @@ void tsp (int hops, int len, uint64_t vpres, tsp_path_t path, long long int *cut
     if ((nb_towns - hops) > 6 &&
         lower_bound_using_hk(path, hops, len, vpres) >= minimum) {
         (*cuts)++;
-        pthread_mutex_unlock(&mutex);
         return;
     }
 
@@ -46,7 +44,6 @@ void tsp (int hops, int len, uint64_t vpres, tsp_path_t path, long long int *cut
     if ((nb_towns - hops) > 22
         && lower_bound_using_lp(path, hops, len, vpres) >= minimum) {
         (*cuts)++;
-        pthread_mutex_unlock(&mutex);
         return;
     }
 
@@ -73,6 +70,18 @@ void tsp (int hops, int len, uint64_t vpres, tsp_path_t path, long long int *cut
             }
         }
     }
-    pthread_mutex_unlock(&mutex);
 }
 
+
+void tspPara(int hops, int len, uint64_t vpres, int *path, long long int *cuts, int *sol, int *sol_len,
+             pthread_mutex_t *mutex, pthread_cond_t *cond) {
+    // On verrouille le mutex
+    pthread_mutex_lock(mutex);
+    // On attend le signal
+    pthread_cond_wait(cond,mutex);
+    // On traite le résultat
+    tsp(hops,len,vpres,path,cuts,sol,sol_len);
+    // On déverouille le mutex
+    pthread_mutex_unlock(mutex);
+
+}
